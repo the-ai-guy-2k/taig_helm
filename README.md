@@ -44,7 +44,10 @@ HELM_MOCK=1 ./run.sh
 ## Files
 
 - `server.py` — local service, stdlib only, localhost only.
-- `web/` — Hestia-layout GUI: index.html, style.css, app.js.
+  Firewall APIs: GET /api/firewall, POST /api/firewall/preview,
+  POST /api/firewall/apply (preview-token gate, single-use).
+- `web/` — Hestia-layout GUI: index.html, style.css, app.js,
+  plus firewall.html + firewall.js (first feature after v1).
 - `config.example.json` — copy to config.json, fill in your details.
 - `run.sh` — dev runner.
 - `local-service/taig-helm.service` — example systemd user unit template

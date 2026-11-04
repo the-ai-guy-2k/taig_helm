@@ -28,6 +28,28 @@ Steps:
    fix it in dev — do NOT try to fix everything before first deploy.
    Ship v1, fix problems as they go.
 
+## FIRST FEATURE after v1 — Firewall (Nov 4, 6:38 PM EST)
+
+Firewall group = iptables GUI home. Built, in order:
+INTUITIVENESS RULE (Tee, Nov 4, 6:40 PM EST, same as Logs): an
+operator must NOT need iptables syntax, chain names, or rule order
+to use Firewall. Pick in plain terms (allow/block, service/port by
+name from a live list where possible, protocol dropdown), see in
+plain words what the rule will do before approve, see current rules
+in a plain table, never type a raw firewall command. If Firewall is
+not intuitive, it fails its own requirement, even if the rules are
+technically correct.
+1. Read-only rules view: current iptables INPUT rules + listening
+   ports, Hestia table style, at `web/firewall.html`.
+2. Add/remove allow/deny form: action dropdown, port number, protocol
+   tcp/udp, source validated — through the locked flow:
+   info -> decide -> preview/approve -> send structured payload ->
+   agent executes -> laptop verifies by re-reading rules -> log.
+   No free-form shell, no auto-apply, no Docker-chain edits, no SSH block.
+3. Persistence is OPEN, in main chat only: install iptables-persistent,
+   or save rules another way. Do NOT install it yet. Until decided,
+   rules are runtime only and the GUI says so plainly.
+
 ## After v1 proof passes — task flow, in order
 
 1. Info: GUI asks, local service sends a structured read request,

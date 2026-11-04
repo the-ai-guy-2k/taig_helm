@@ -34,15 +34,100 @@ Droplet host, SSH user, SSH key path, and agent paths. config.json is
 gitignored — do not commit it.
 """
 
+import hashlib
+import ipaddress
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
+
+# Preview tokens: single-use, 10-minute expiry, in-memory only.
+# An apply without a fresh preview token is rejected — this is the
+# preview-approve gate, enforced server-side, not just a GUI button.
+PREVIEW_TOKENS = {}
+
+
+def make_preview_token(payload):
+    token = secrets.token_hex(16)
+    PREVIEW_TOKENS[token] = {"payload": payload, "expires": time.time() + 600}
+    return token
+
+
+def take_preview_token(token):
+    entry = PREVIEW_TOKENS.pop(token, None)
+    if not entry or entry["expires"] < time.time():
+        return None
+    return entry["payload"]
+
+
+def validate_firewall_payload(body):
+    """Mirror the agent's validation, on the laptop, before any send."""
+    if not isinstance(body, dict):
+        return None, "payload must be an object"
+    op = body.get("op")
+    if op not in ("add", "remove"):
+        return None, "op must be add or remove"
+    action = body.get("action")
+    protocol = body.get("protocol")
+    try:
+        port = int(body.get("port"))
+    except Exception:
+        return None, "port must be a number"
+    source = body.get("source", "any")
+    if action not in ("allow", "deny"):
+        return None, "action must be allow or deny"
+    if protocol not in ("tcp", "udp"):
+        return None, "protocol must be tcp or udp"
+    if not 1 <= port <= 65535:
+        return None, "port must be 1-65535"
+    if action == "deny" and port == 22:
+        return None, "refused: deny on SSH port 22 would lock out the box"
+    if source in ("any", "0.0.0.0/0", "::/0"):
+        source_norm = "0.0.0.0/0"
+    else:
+        try:
+            source_norm = str(ipaddress.ip_network(source, strict=False))
+        except Exception:
+            return None, "source must be an IP/CIDR or 'any'"
+    payload = {"op": op, "action": action, "protocol": protocol,
+               "port": port, "source": source_norm}
+    return payload, None
+
+
+SERVICE_NAMES = {
+    22: "SSH", 80: "Web", 443: "Secure web", 53: "DNS",
+    3000: "TAIG Service Portal", 3002: "TAIG Speed", 8003: "PIA",
+}
+
+
+def service_name(port):
+    return SERVICE_NAMES.get(port, f"Port {port}")
+
+
+def firewall_safety_checks(payload, current_rules):
+    """Plain-language checks, no chain names, no rule order, no syntax.
+    If Firewall is not intuitive, it fails its own requirement, even
+    if the rules are technically correct (Tee, Nov 4, 6:40 PM EST)."""
+    checks = []
+    if payload["port"] == 22 and payload["action"] == "allow":
+        checks.append("Port 22 is SSH — this is an allow, not a block, "
+                      "so it does not lock you out.")
+    checks.append("This only changes Helm's own rules for this box. "
+                  "It never touches Docker's own rules.")
+    checks.append("You do not need to know rule order — Helm puts the "
+                  "rule where it belongs. No position to pick.")
+    checks.append("Runtime rule only — it does NOT survive a reboot "
+                  "until the persistence decision in main chat is made.")
+    if payload["op"] == "remove":
+        checks.append("Remove only works for rules Helm created. "
+                      "Rules from anything else are never removed.")
+    return checks
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE, "web")
@@ -132,6 +217,49 @@ def run_agent(cfg, command, use_status_file=False):
     return data, meta
 
 
+def run_firewall_ssh(cfg, subcommand, payload=None):
+    """Run ONE fixed firewall command over SSH. payload fields are
+    validated before this point, and quoted as single args — no shell."""
+    if subcommand == "list":
+        remote = f"python3 {cfg['agent_path']} firewall list"
+    elif subcommand in ("add", "remove"):
+        remote = (f"python3 {cfg['agent_path']} firewall {subcommand} "
+                  f"--action {payload['action']} "
+                  f"--protocol {payload['protocol']} "
+                  f"--port {payload['port']} "
+                  f"--source {payload['source']}")
+    else:
+        raise ValueError("unknown firewall subcommand")
+    key = os.path.expanduser(cfg["ssh_key"])
+    ssh_cmd = ["ssh", "-i", key, "-o", "BatchMode=yes",
+               "-o", "ConnectTimeout=10",
+               f"{cfg['ssh_user']}@{cfg['droplet_host']}", remote]
+    start = time.time()
+    proc = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=30)
+    duration_ms = int((time.time() - start) * 1000)
+    log_ssh(remote, proc.returncode, duration_ms, "")
+    if proc.returncode != 0:
+        raise RuntimeError(f"ssh/firewall failed rc={proc.returncode}: "
+                           f"{proc.stderr.strip()[:300]}")
+    return json.loads(proc.stdout)
+
+
+def mock_firewall():
+    return {
+        "input_policy": "ACCEPT",
+        "rules": [
+            {"chain": "INPUT", "action": "allow", "protocol": "tcp",
+             "port": 80, "service": "Web", "source": "0.0.0.0/0",
+             "helm_managed": True,
+             "raw": "-A INPUT -p tcp --dport 80 -m comment --comment taig-helm -j ACCEPT"},
+        ],
+        "listening_ports": [{"proto": "tcp", "local": "0.0.0.0:22"},
+                            {"proto": "tcp", "local": "0.0.0.0:3002"}],
+        "persistent_note": "MOCK — runtime rules only, persistence open.",
+        "guards": ["never deny SSH port 22", "never touch DOCKER chains"],
+    }
+
+
 def mock_status():
     return {
         "agent": "taig_helm_agent",
@@ -178,8 +306,113 @@ class Handler(SimpleHTTPRequestHandler):
             self.handle_status(use_status_file=False)
         elif path == "/api/status-file":
             self.handle_status(use_status_file=True)
+        elif path == "/api/firewall":
+            self.handle_firewall_read()
         else:
             super().do_GET()
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            body = json.loads(raw or b"{}")
+        except Exception:
+            return self.send_json({"error": "body must be JSON"}, status=400)
+        if path == "/api/firewall/preview":
+            return self.handle_firewall_preview(body)
+        if path == "/api/firewall/apply":
+            return self.handle_firewall_apply(body)
+        return self.send_json({"error": "unknown endpoint"}, status=404)
+
+    def handle_firewall_read(self):
+        if os.environ.get("HELM_MOCK") == "1":
+            return self.send_json({"data": mock_firewall(),
+                                   "meta": {"source": "mock"}})
+        try:
+            cfg = load_config()
+            data = run_firewall_ssh(cfg, "list")
+            for r in data.get("rules", []):
+                if isinstance(r.get("port"), int):
+                    r["service"] = service_name(r["port"])
+        except Exception as exc:
+            return self.send_json({"error": str(exc)}, status=502)
+        return self.send_json({"data": data, "meta": {"source": "live"}})
+
+    def handle_firewall_preview(self, body):
+        payload, err = validate_firewall_payload(body)
+        if err:
+            return self.send_json({"error": err}, status=400)
+        # Preview does NOT send anything. It shows the payload + checks.
+        # Current rules are read for duplicate context, best-effort.
+        current = []
+        if os.environ.get("HELM_MOCK") == "1":
+            current = mock_firewall()["rules"]
+        else:
+            try:
+                current = run_firewall_ssh(load_config(), "list")["rules"]
+            except Exception:
+                current = []
+        token = make_preview_token(payload)
+        # Intuitive first: plain words, no iptables syntax required.
+        # Technical detail is kept, but second, not as the headline.
+        verb = "Allow" if payload["action"] == "allow" else "Block"
+        whom = ("from anywhere" if payload["source"] == "0.0.0.0/0"
+                else f"only from {payload['source']}")
+        svc = service_name(payload["port"])
+        plain = (f"{'Add' if payload['op'] == 'add' else 'Remove'}: "
+                 f"{verb} {svc} ({payload['protocol'].upper()} "
+                 f"port {payload['port']}) {whom}.")
+        return self.send_json({
+            "payload": payload,
+            "preview_token": token,
+            "safety_checks": firewall_safety_checks(payload, current),
+            "effect": plain,
+            "technical": (f"Technical: {payload['op']} INPUT rule, "
+                          f"{payload['action']} {payload['protocol']} "
+                          f"port {payload['port']} from {payload['source']}, "
+                          f"comment taig-helm, INPUT only."),
+            "note": "Nothing has been sent yet. Approve to send this exact payload.",
+        })
+
+    def handle_firewall_apply(self, body):
+        payload = take_preview_token(body.get("preview_token", ""))
+        if payload is None:
+            return self.send_json(
+                {"error": "preview token missing, expired, or already used — "
+                          "preview the rule again before applying"}, status=400)
+        if os.environ.get("HELM_MOCK") == "1":
+            return self.send_json({
+                "applied": True, "source": "mock",
+                "payload": payload,
+                "verification": {"method": "mock re-read (not live)",
+                                 "note": "MOCK ONLY — run live for real verification"},
+            })
+        try:
+            cfg = load_config()
+            result = run_firewall_ssh(cfg, payload["op"], payload)
+            # Verification, on the laptop, by RE-READING rules — never
+            # exit code alone. The apply result above is not proof.
+            verified = run_firewall_ssh(cfg, "list")
+            found = any(
+                r.get("action") == payload["action"]
+                and r.get("protocol") == payload["protocol"]
+                and r.get("port") == payload["port"]
+                for r in verified.get("rules", []))
+            expected = payload["op"] == "add"
+            verification = {
+                "method": "state re-read (firewall list)",
+                "expected_present": expected,
+                "found_present": found,
+                "verified": found == expected,
+            }
+        except Exception as exc:
+            return self.send_json({"error": str(exc)}, status=502)
+        return self.send_json({
+            "applied": result, "verification": verification,
+            "meta": {"source": "live",
+                     "note": "Verification is the re-read above, not the agent exit code."},
+        })
 
     def handle_status(self, use_status_file):
         if os.environ.get("HELM_MOCK") == "1":
