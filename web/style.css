@@ -1,0 +1,20 @@
+/* TAIG Helm v1 — Hestia layout DNA only: dark, plain, readable. No hype styling. */
+*{box-sizing:border-box} body{margin:0;background:#141414;color:#e8e6df;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;background:#1e1e1e;border-bottom:1px solid #333}
+.brand{font-weight:800;letter-spacing:.02em}.brand span{color:#d8b25c}.topmeta{color:#aaa;font-size:13px}
+.groups{display:flex;gap:8px;flex-wrap:wrap;padding:12px 20px;background:#1a1a1a;border-bottom:1px solid #333}
+.groups button{background:#262626;color:#e8e6df;border:1px solid #444;padding:8px 14px;border-radius:6px;cursor:pointer}
+.groups button.active{background:#333;border-color:#d8b25c}.groups button:disabled{opacity:.45;cursor:not-allowed}
+main{max-width:1000px;margin:0 auto;padding:20px}
+.banner{padding:12px;border-radius:8px;background:#262626;margin-bottom:16px}
+.banner.live{background:#1f3a26}.banner.mock{background:#3a2f1f}.banner.error{background:#3a1f1f}
+.header{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-bottom:20px}
+.label{color:#aaa;font-size:12px;text-transform:uppercase;letter-spacing:.05em}.big{font-size:20px;font-weight:700}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-bottom:20px}
+.card{background:#1e1e1e;border:1px solid #333;border-radius:10px;padding:16px}.card h2{margin:0 0 8px}
+.pct{font-size:32px;font-weight:800}.bar{height:14px;background:#333;border-radius:7px;overflow:hidden;margin:10px 0}
+.bar div{height:100%;background:#d8b25c;width:0%}
+table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid #333;text-align:left}
+.actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:20px 0}
+.actions button{background:#d8b25c;color:#141414;border:0;padding:10px 16px;border-radius:6px;font-weight:700;cursor:pointer}
+.note{color:#aaa;font-size:13px}

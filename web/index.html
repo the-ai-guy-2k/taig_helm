@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TAIG Helm</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">TAIG <span>Helm</span></div>
+  <div class="topmeta">Panel version: not set &middot; Droplet only, v1 proof</div>
+</header>
+<nav class="groups">
+  <button class="active">Home</button>
+  <button disabled title="After v1 proof">Config</button>
+  <button disabled title="After v1 proof">Task / Process</button>
+  <button disabled title="After v1 proof">Updates</button>
+  <button disabled title="After v1 proof">Firewall</button>
+  <button disabled title="After v1 proof">Logs</button>
+  <button disabled title="After v1 proof">Restarts</button>
+</nav>
+<main>
+  <div id="banner" class="banner">Loading Droplet status…</div>
+  <section class="header">
+    <div><div class="label">Hostname</div><div id="hostname" class="big">—</div></div>
+    <div><div class="label">Operating System</div><div id="os">—</div></div>
+    <div><div class="label">Uptime</div><div id="uptime">—</div></div>
+    <div><div class="label">Load Average</div><div id="load">—</div></div>
+    <div><div class="label">Last updated</div><div id="updated">—</div></div>
+  </section>
+  <section class="cards">
+    <article class="card">
+      <h2>CPU</h2><div class="pct" id="cpu-pct">—</div>
+      <div class="bar"><div id="cpu-bar"></div></div>
+      <p id="cpu-detail">—</p>
+    </article>
+    <article class="card">
+      <h2>Memory</h2><div class="pct" id="mem-pct">—</div>
+      <div class="bar"><div id="mem-bar"></div></div>
+      <p id="mem-detail">—</p>
+    </article>
+    <article class="card">
+      <h2>Storage</h2><div class="pct" id="disk-pct">—</div>
+      <div class="bar"><div id="disk-bar"></div></div>
+      <p id="disk-detail">—</p>
+    </article>
+  </section>
+  <section>
+    <h2>Disks</h2>
+    <table><thead><tr><th>Mount</th><th>Used</th><th>Free</th><th>Total</th><th>Use</th></tr></thead>
+    <tbody id="disks"><tr><td colspan="5">—</td></tr></tbody></table>
+  </section>
+  <div class="actions">
+    <button id="refresh">Refresh now</button>
+    <button id="poll-file">Poll status file</button>
+    <label><input type="checkbox" id="auto" checked> Auto-refresh every 30s (poll, no push)</label>
+  </div>
+  <p class="note">v1 proof: real Droplet data from the Helm Agent, via the laptop local service over SSH. Mock mode is labeled MOCK and is never the proof. No task actions in v1 — tasks come after this dashboard proof passes.</p>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

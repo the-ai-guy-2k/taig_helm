@@ -1,0 +1,1 @@
+{"agent_path":"/opt/taig-helm-agent/agent.py","droplet_host":"138.68.226.24","ssh_key":"~/.ssh/id_ed25519","ssh_user":"root","status_file_path":"/var/lib/taig-helm-agent/status.json"}

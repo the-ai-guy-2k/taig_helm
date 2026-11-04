@@ -1,0 +1,18 @@
+# Example systemd USER unit template — Linux laptop autostart.
+# Replace <path-to-taig_helm> with your checkout path, then:
+#   systemctl --user enable --now taig-helm
+# This is a template for dev. Windows autostart is a later, Tee-picked step.
+[Unit]
+Description=TAIG Helm local service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=<path-to-taig_helm>
+ExecStart=/usr/bin/python3 <path-to-taig_helm>/server.py
+Restart=on-failure
+Environment=HELM_PORT=8080
+
+[Install]
+WantedBy=default.target
