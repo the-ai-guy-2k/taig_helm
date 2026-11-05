@@ -65,6 +65,35 @@ cloud-init, glib, python3-twisted security, tmux, ubuntu-pro-client.
 Unattended-upgrades is enabled/active for security updates — Helm
 still shows the full list and lets the operator pick manually.
 
+## Updates — PARTIALLY good, NOT closed (Tee, Nov 4, 7:17 PM EST)
+
+Missing portion, logged as an OPEN improvement, not built yet:
+feedback DURING install. Current Updates gives preview + apply +
+verify-after by re-read, plus helm.log after the fact — but no live
+progress feedback while apt is actually installing (what's installing
+now, progress, any apt prompt/error as it happens). Do NOT claim
+Updates is fully done until that during-install feedback is added.
+That improvement is separate work, after Logs unless Tee says otherwise.
+
+## THIRD FEATURE after v1 — Logs (Nov 4, 7:17 PM EST)
+
+Logs group is the ONE intuitive place to find logs for anything.
+Intuitiveness is the core requirement (ASCIF Q7, Nov 4): pick
+service/box/time in plain terms, no log paths or command syntax
+needed. If Logs is not intuitive, the design fails.
+Read-only — Logs never changes anything, so there is NO
+preview-token apply here, only list + read.
+Coverage, plain names: System log, Sign-ins, Kernel messages,
+Package changes, Update history, Automatic security updates,
+First-boot setup, Website visits, Website errors, TAIG Helm agent,
+plus Docker apps PIA, Nope portal, TAIG Speed, TAIG Service Portal.
+Live Droplet log facts at build time (Nov 4, 7:17 PM):
+/var/log/syslog 1.8M, journal 20M, auth.log 1.0M,
+taig-helm-agent.log 108K, nginx access/error logs present
+(access.log.1 124K), dpkg.log 32K, apt logs,
+unattended-upgrades logs, cloud-init logs, kern.log/dmesg.
+Containers live: pia, nope-portal, taig-speed, tsp.
+
 ## After v1 proof passes — task flow, in order
 
 1. Info: GUI asks, local service sends a structured read request,

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TAIG Helm — Logs</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">TAIG <span>Helm</span> — Logs</div>
+  <div class="topmeta"><a href="index.html" style="color:#d8b25c">← Home</a> &middot; One place to find logs for anything</div>
+</header>
+<main>
+  <div id="banner" class="banner">Loading log list…</div>
+  <p class="note">Pick what you want to see in plain words — which service, how far back, and an optional word to search for. No log paths, no command syntax needed. <strong>Logs never changes anything</strong> — this page only reads, there is no apply button here.</p>
+  <section>
+    <h2>Find logs</h2>
+    <form id="read-form">
+      <label>What do you want to see?
+        <select id="service"></select>
+      </label><br><br>
+      <label>How far back?
+        <select id="since">
+          <option value="all">Everything (last lines shown)</option>
+          <option value="1">Last hour</option>
+          <option value="24">Last day</option>
+          <option value="168">Last 7 days</option>
+        </select>
+      </label><br><br>
+      <label>How many lines?
+        <select id="lines">
+          <option value="50">50</option>
+          <option value="100" selected>100</option>
+          <option value="200">200</option>
+          <option value="500">500</option>
+        </select>
+      </label><br><br>
+      <label>Search for a word (optional, plain words only):
+        <input id="search" type="text" placeholder="e.g. error, failed, sshd">
+      </label><br><br>
+      <button type="submit">Show logs</button>
+    </form>
+  </section>
+  <section>
+    <h2 id="result-title">Logs</h2>
+    <p id="result-meta"></p>
+    <pre id="lines" style="white-space:pre-wrap; word-break:break-word; background:#111; padding:12px; overflow:auto">Pick a service above and press Show logs.</pre>
+    <p class="note" id="result-note"></p>
+  </section>
+  <p class="note">Flow: pick in plain terms → read (structured only, allowlist only) → lines shown. Time filter: exact for Docker logs, best-effort for plain files — lines without a readable timestamp are kept, not dropped.</p>
+</main>
+<script src="logs.js"></script>
+</body>
+</html>

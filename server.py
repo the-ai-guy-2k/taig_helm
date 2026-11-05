@@ -316,6 +316,108 @@ def mock_updates():
                     "Run live for the real 13-package list."}
 
 
+def run_logs_ssh(cfg, subcommand, payload=None):
+    if subcommand == "list":
+        remote = f"python3 {cfg['agent_path']} logs list"
+    elif subcommand == "read":
+        remote = (f"python3 {cfg['agent_path']} logs read "
+                  f"--service {payload['service']} "
+                  f"--lines {payload['lines']}")
+        if payload.get("search"):
+            remote += f" --search {payload['search']}"
+        if payload.get("since_hours"):
+            remote += f" --since-hours {payload['since_hours']}"
+    else:
+        raise ValueError("unknown logs subcommand")
+    key = os.path.expanduser(cfg["ssh_key"])
+    ssh_cmd = ["ssh", "-i", key, "-o", "BatchMode=yes",
+               "-o", "ConnectTimeout=10",
+               f"{cfg['ssh_user']}@{cfg['droplet_host']}", remote]
+    start = time.time()
+    proc = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=120)
+    duration_ms = int((time.time() - start) * 1000)
+    log_ssh(remote, proc.returncode, duration_ms, "")
+    if proc.returncode != 0:
+        raise RuntimeError(f"ssh/logs failed rc={proc.returncode}: "
+                           f"{proc.stderr.strip()[-500:]}")
+    return json.loads(proc.stdout)
+
+
+def validate_logs_payload(body):
+    if not isinstance(body, dict):
+        return None, "payload must be an object"
+    service = body.get("service")
+    if not service or not re.match(r"^[a-z0-9\-]+$", service):
+        return None, "service must be a plain log name from the list"
+    try:
+        lines = int(body.get("lines", 100))
+    except Exception:
+        return None, "lines must be a number"
+    if not 1 <= lines <= 500:
+        return None, "lines must be 1-500"
+    search = body.get("search") or None
+    if search and (len(search) > 100
+                   or not re.match(r"^[A-Za-z0-9 _\-./:]+$", search)):
+        return None, "search must be plain words/numbers, no shell characters"
+    since = body.get("since_hours")
+    if since in (None, "", "all"):
+        since_hours = None
+    else:
+        try:
+            since_hours = int(since)
+        except Exception:
+            return None, "time filter must be last hour, last day, last 7 days, or all"
+        if since_hours not in (1, 24, 168):
+            return None, "time filter must be last hour, last day, last 7 days, or all"
+    return {"service": service, "lines": lines, "search": search,
+            "since_hours": since_hours}, None
+
+
+def mock_logs():
+    sources = [
+        {"key": "system", "name": "System log", "kind": "file",
+         "description": "The box's main system log.", "exists": True, "size_bytes": 1800000},
+        {"key": "signins", "name": "Sign-ins", "kind": "file",
+         "description": "Who signed in.", "exists": True, "size_bytes": 1000000},
+        {"key": "helm-agent", "name": "TAIG Helm agent", "kind": "file",
+         "description": "Helm agent's own log.", "exists": True, "size_bytes": 108000},
+        {"key": "website-visits", "name": "Website visits", "kind": "file",
+         "description": "Visits to the web server.", "exists": True, "size_bytes": 124000},
+        {"key": "pia", "name": "PIA", "kind": "docker",
+         "description": "PIA app.", "exists": True},
+        {"key": "nope-portal", "name": "Nope portal", "kind": "docker",
+         "description": "Nope operator portal.", "exists": True},
+        {"key": "taig-speed", "name": "TAIG Speed", "kind": "docker",
+         "description": "TAIG Speed inventory service.", "exists": True},
+        {"key": "tsp", "name": "TAIG Service Portal", "kind": "docker",
+         "description": "TAIG Service Portal (TSP) service.", "exists": True},
+    ]
+    return {"sources": sources,
+            "note": "MOCK — example list only, not the live Droplet list."}
+
+
+def mock_logs_read(payload):
+    # Mock mirrors the live allowlist: unknown service is refused here too.
+    known = {s["key"]: s["name"] for s in mock_logs()["sources"]}
+    if payload["service"] not in known:
+        raise ValueError(f"unknown log service: {payload['service']!r}")
+    lines = [
+        "Nov  4 19:17:37 droplet sshd[123]: Accepted publickey for root",
+        "Nov  4 19:17:38 droplet systemd[1]: Started TAIG Helm status writer.",
+        "Nov  4 19:18:02 droplet nginx: GET / 200",
+    ]
+    if payload.get("search"):
+        needle = payload["search"].lower()
+        lines = [l for l in lines if needle in l.lower()]
+    lines = lines[-payload["lines"]:]
+    return {"service": payload["service"],
+            "name": known[payload["service"]], "kind": "mock",
+            "lines": lines, "total_matched": len(lines),
+            "returned": len(lines), "search": payload.get("search"),
+            "since_hours": payload.get("since_hours"),
+            "note": "MOCK — example lines only, not live Droplet lines."}
+
+
 def mock_status():
     return {
         "agent": "taig_helm_agent",
@@ -366,6 +468,8 @@ class Handler(SimpleHTTPRequestHandler):
             self.handle_firewall_read()
         elif path == "/api/updates":
             self.handle_updates_read()
+        elif path == "/api/logs":
+            self.handle_logs_list()
         else:
             super().do_GET()
 
@@ -385,7 +489,39 @@ class Handler(SimpleHTTPRequestHandler):
             return self.handle_updates_preview(body)
         if path == "/api/updates/apply":
             return self.handle_updates_apply(body)
+        if path == "/api/logs/read":
+            return self.handle_logs_read(body)
         return self.send_json({"error": "unknown endpoint"}, status=404)
+
+    def handle_logs_list(self):
+        if os.environ.get("HELM_MOCK") == "1":
+            return self.send_json({"data": mock_logs(),
+                                   "meta": {"source": "mock"}})
+        try:
+            cfg = load_config()
+            data = run_logs_ssh(cfg, "list")
+        except Exception as exc:
+            return self.send_json({"error": str(exc)}, status=502)
+        return self.send_json({"data": data, "meta": {"source": "live"}})
+
+    def handle_logs_read(self, body):
+        payload, err = validate_logs_payload(body)
+        if err:
+            return self.send_json({"error": err}, status=400)
+        # Read-only: no preview token, no apply endpoint exists for Logs.
+        if os.environ.get("HELM_MOCK") == "1":
+            try:
+                data = mock_logs_read(payload)
+            except Exception as exc:
+                return self.send_json({"error": str(exc)}, status=400)
+            return self.send_json({"data": data,
+                                   "meta": {"source": "mock"}})
+        try:
+            cfg = load_config()
+            data = run_logs_ssh(cfg, "read", payload)
+        except Exception as exc:
+            return self.send_json({"error": str(exc)}, status=502)
+        return self.send_json({"data": data, "meta": {"source": "live"}})
 
     def handle_updates_read(self):
         if os.environ.get("HELM_MOCK") == "1":

@@ -17,7 +17,7 @@
   <button disabled title="After v1 proof">Task / Process</button>
   <button onclick="location.href='updates.html'">Updates</button>
   <button onclick="location.href='firewall.html'">Firewall</button>
-  <button disabled title="After v1 proof">Logs</button>
+  <button onclick="location.href='logs.html'">Logs</button>
   <button disabled title="After v1 proof">Restarts</button>
 </nav>
 <main>
@@ -56,7 +56,7 @@
     <button id="poll-file">Poll status file</button>
     <label><input type="checkbox" id="auto" checked> Auto-refresh every 30s (poll, no push)</label>
   </div>
-  <p class="note">v1 proof: real Droplet data from the Helm Agent, via the laptop local service over SSH. Mock mode is labeled MOCK and is never the proof. Live features now: Firewall and Updates — other groups still to come.</p>
+  <p class="note">v1 proof: real Droplet data from the Helm Agent, via the laptop local service over SSH. Mock mode is labeled MOCK and is never the proof. Live features now: Firewall, Updates and Logs — other groups still to come. Updates is partially good: live progress feedback during install is still missing (see build plan).</p>
 </main>
 <script src="app.js"></script>
 </body>
