@@ -260,6 +260,62 @@ def mock_firewall():
     }
 
 
+def run_updates_ssh(cfg, subcommand, payload=None):
+    if subcommand == "check":
+        remote = f"python3 {cfg['agent_path']} updates check"
+    elif subcommand == "apply":
+        if payload["scope"] == "whole":
+            remote = f"python3 {cfg['agent_path']} updates apply --scope whole"
+        else:
+            remote = (f"python3 {cfg['agent_path']} updates apply "
+                      f"--scope one --package {payload['package']}")
+    else:
+        raise ValueError("unknown updates subcommand")
+    key = os.path.expanduser(cfg["ssh_key"])
+    ssh_cmd = ["ssh", "-i", key, "-o", "BatchMode=yes",
+               "-o", "ConnectTimeout=10",
+               f"{cfg['ssh_user']}@{cfg['droplet_host']}", remote]
+    start = time.time()
+    proc = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=960)
+    duration_ms = int((time.time() - start) * 1000)
+    log_ssh(remote, proc.returncode, duration_ms, "")
+    if proc.returncode != 0:
+        raise RuntimeError(f"ssh/updates failed rc={proc.returncode}: "
+                           f"{proc.stderr.strip()[-500:]}")
+    return json.loads(proc.stdout)
+
+
+def validate_updates_payload(body):
+    if not isinstance(body, dict):
+        return None, "payload must be an object"
+    scope = body.get("scope")
+    if scope not in ("whole", "one"):
+        return None, "scope must be whole or one"
+    package = body.get("package")
+    if scope == "one":
+        if not package or not re.match(r"^[a-z0-9][a-z0-9+.\-]*$", package):
+            return None, "package name is not valid"
+    else:
+        package = None
+    return {"kind": "updates", "scope": scope, "package": package}, None
+
+
+def mock_updates():
+    pkgs = [
+        {"name": "apt", "current": "2.8.3", "new": "2.8.4ubuntu0.1", "security": True},
+        {"name": "apt-utils", "current": "2.8.3", "new": "2.8.4ubuntu0.1", "security": True},
+        {"name": "libapt-pkg", "current": "2.8.3", "new": "2.8.4ubuntu0.1", "security": True},
+        {"name": "cloud-init", "current": "24.1", "new": "24.2", "security": False},
+        {"name": "python3-twisted", "current": "22.1", "new": "22.2", "security": True},
+        {"name": "tmux", "current": "3.3a-1", "new": "3.3a-1ubuntu0.1", "security": False},
+        {"name": "ubuntu-pro-client", "current": "32.1", "new": "32.2", "security": False},
+    ]
+    return {"count": len(pkgs), "packages": pkgs,
+            "unattended_upgrades_active": True,
+            "note": "MOCK — example list only, not the live Droplet list. "
+                    "Run live for the real 13-package list."}
+
+
 def mock_status():
     return {
         "agent": "taig_helm_agent",
@@ -308,6 +364,8 @@ class Handler(SimpleHTTPRequestHandler):
             self.handle_status(use_status_file=True)
         elif path == "/api/firewall":
             self.handle_firewall_read()
+        elif path == "/api/updates":
+            self.handle_updates_read()
         else:
             super().do_GET()
 
@@ -323,7 +381,100 @@ class Handler(SimpleHTTPRequestHandler):
             return self.handle_firewall_preview(body)
         if path == "/api/firewall/apply":
             return self.handle_firewall_apply(body)
+        if path == "/api/updates/preview":
+            return self.handle_updates_preview(body)
+        if path == "/api/updates/apply":
+            return self.handle_updates_apply(body)
         return self.send_json({"error": "unknown endpoint"}, status=404)
+
+    def handle_updates_read(self):
+        if os.environ.get("HELM_MOCK") == "1":
+            return self.send_json({"data": mock_updates(),
+                                   "meta": {"source": "mock"}})
+        try:
+            cfg = load_config()
+            data = run_updates_ssh(cfg, "check")
+        except Exception as exc:
+            return self.send_json({"error": str(exc)}, status=502)
+        return self.send_json({"data": data, "meta": {"source": "live"}})
+
+    def handle_updates_preview(self, body):
+        payload, err = validate_updates_payload(body)
+        if err:
+            return self.send_json({"error": err}, status=400)
+        # Preview does NOT install anything. Current list, best-effort,
+        # for plain-words preview text with versions, e.g.
+        # "Update tmux from 3.3a-1 to 3.3a-1ubuntu0.1."
+        current_list = []
+        if os.environ.get("HELM_MOCK") == "1":
+            current_list = mock_updates()["packages"]
+        else:
+            try:
+                current_list = run_updates_ssh(load_config(), "check")["packages"]
+            except Exception:
+                current_list = []
+        if payload["scope"] == "whole":
+            effect = (f"Update the whole box — all {len(current_list)} "
+                      f"package(s) in the list above.")
+            detail = "Whole-box update: apt upgrade only, never a release upgrade, never Docker."
+        else:
+            match = next((p for p in current_list
+                          if p["name"] == payload["package"]), None)
+            if match:
+                effect = (f"Update {match['name']} from {match['current']} "
+                          f"to {match['new']}.")
+            else:
+                effect = f"Update just one package: {payload['package']}."
+            detail = "One-package update only. Nothing else in the list changes."
+        token = make_preview_token(payload)
+        return self.send_json({
+            "payload": payload, "preview_token": token,
+            "effect": effect, "detail": detail,
+            "safety_checks": [
+                "Nothing is installed yet — this is preview only.",
+                "No auto-apply. You approve, then it sends.",
+                "No release upgrade, no Docker changes — apt packages only.",
+                "After apply, the laptop re-reads the update list to verify.",
+            ],
+            "note": "Nothing has been sent yet. Approve to send this exact choice.",
+        })
+
+    def handle_updates_apply(self, body):
+        payload = take_preview_token(body.get("preview_token", ""))
+        if payload is None or payload.get("kind") != "updates":
+            return self.send_json(
+                {"error": "preview token missing, expired, or already used — "
+                          "preview the update again before applying"}, status=400)
+        if os.environ.get("HELM_MOCK") == "1":
+            return self.send_json({
+                "applied": True, "source": "mock", "payload": payload,
+                "verification": {"method": "mock re-read (not live)",
+                                 "note": "MOCK ONLY — run live for real verification"},
+            })
+        try:
+            cfg = load_config()
+            result = run_updates_ssh(cfg, "apply", payload)
+            verified = run_updates_ssh(cfg, "check")
+            remaining = [p["name"] for p in verified.get("packages", [])]
+            if payload["scope"] == "whole":
+                verified_ok = len(remaining) == 0
+                verify_text = f"{len(remaining)} packages still listed after whole-box update."
+            else:
+                verified_ok = payload["package"] not in remaining
+                verify_text = (f"{payload['package']} is no longer in the list."
+                               if verified_ok else
+                               f"{payload['package']} is still in the list.")
+            verification = {"method": "state re-read (updates check)",
+                            "verified": verified_ok,
+                            "remaining_packages": remaining,
+                            "text": verify_text}
+        except Exception as exc:
+            return self.send_json({"error": str(exc)}, status=502)
+        return self.send_json({
+            "applied": result, "verification": verification,
+            "meta": {"source": "live",
+                     "note": "Verification is the re-read above, not the agent exit code."},
+        })
 
     def handle_firewall_read(self):
         if os.environ.get("HELM_MOCK") == "1":
@@ -377,7 +528,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def handle_firewall_apply(self, body):
         payload = take_preview_token(body.get("preview_token", ""))
-        if payload is None:
+        if payload is None or payload.get("kind") == "updates":
             return self.send_json(
                 {"error": "preview token missing, expired, or already used — "
                           "preview the rule again before applying"}, status=400)

@@ -50,6 +50,21 @@ technically correct.
    or save rules another way. Do NOT install it yet. Until decided,
    rules are runtime only and the GUI says so plainly.
 
+## SECOND FEATURE after v1 — Updates (Nov 4, 6:55 PM EST)
+
+Updates group is the ONE place to update the whole box OR just one
+package — manual pick, NOT auto-apply. Box auto-checks on page open;
+checking never installs. Preview in plain words ("Update tmux from
+3.3a-1 to 3.3a-1ubuntu0.1", or "Update the whole box"), approve, then
+send structured choice, agent updates, laptop verifies by re-reading
+the list, log everything. No apt syntax needed, no release upgrade,
+no Docker changes, apt packages only, MVP scope.
+Live state at build time (Nov 4, 6:55 PM, after apt-get update):
+13 packages upgradable, including apt security 2.8.3 -> 2.8.4ubuntu0.1,
+cloud-init, glib, python3-twisted security, tmux, ubuntu-pro-client.
+Unattended-upgrades is enabled/active for security updates — Helm
+still shows the full list and lets the operator pick manually.
+
 ## After v1 proof passes — task flow, in order
 
 1. Info: GUI asks, local service sends a structured read request,

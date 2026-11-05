@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TAIG Helm — Updates</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">TAIG <span>Helm</span> — Updates</div>
+  <div class="topmeta"><a href="index.html" style="color:#d8b25c">← Home</a> &middot; The one place to update the box, or just one package</div>
+</header>
+<main>
+  <div id="banner" class="banner">Checking for updates…</div>
+  <p class="note">This page checks automatically when you open it — checking never installs anything. You pick whole box or one package, you see in plain words what will update, you approve, then it sends. No auto-apply, no release upgrade, no Docker changes — apt packages only.</p>
+  <p id="unattended"></p>
+  <section>
+    <h2>Packages ready to update (<span id="count">—</span>)</h2>
+    <table><thead><tr><th>Package</th><th>Now</th><th>New version</th><th>Security</th></tr></thead>
+    <tbody id="pkgs"><tr><td colspan="4">—</td></tr></tbody></table>
+    <button id="refresh">Check again</button>
+  </section>
+  <section>
+    <h2>What do you want to update?</h2>
+    <form id="pick-form">
+      <label><input type="radio" name="scope" value="whole" checked> The whole box — every package above</label><br>
+      <label><input type="radio" name="scope" value="one"> Just one package: <select id="one-pkg"></select></label><br><br>
+      <button type="submit">Preview update</button>
+    </form>
+  </section>
+  <section id="preview" style="display:none">
+    <h2>Preview — nothing installed yet</h2>
+    <p id="preview-effect"></p>
+    <p id="preview-detail"></p>
+    <ul id="preview-checks"></ul>
+    <button id="approve">Approve and update</button>
+    <button id="cancel-preview">Cancel</button>
+  </section>
+  <section id="result" style="display:none">
+    <h2>Result + verification</h2>
+    <p id="result-text"></p>
+    <p id="verify-text"></p>
+  </section>
+  <p class="note">Flow: check (auto) → pick whole box or one package → preview in plain words → approve → send structured choice → agent updates → laptop re-reads the list to verify → log. Exit code alone is never proof.</p>
+</main>
+<script src="updates.js"></script>
+</body>
+</html>
