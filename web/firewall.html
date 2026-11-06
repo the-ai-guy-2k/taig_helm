@@ -13,9 +13,21 @@
 </header>
 <main>
   <div id="banner" class="banner">Loading firewall rules…</div>
-  <p class="note"><strong>Guards, always:</strong> never block SSH, never touch Docker's own rules, remove only rules Helm created. <strong>Rules are runtime only</strong> until the persistence decision in main chat — they do NOT survive reboot yet. You never need to type a firewall command, and you never need to know rule order — Helm handles that.</p>
+  <p class="note"><strong>Guards, always:</strong> never block SSH, never touch Docker's own rules, remove only rules Helm created. <strong>Rules are saved after every change</strong>, so they survive a reboot — reboot survival is not yet verified live, test after push. <strong>Docker apps are blocked on their container port</strong>, not their host port — the box itself does not block Docker ports, so a block on the wrong port matches nothing. You never need to type a firewall command, and you never need to know rule order — Helm handles that.</p>
   <section>
-    <h2>Current rules</h2>
+    <h2>Services — host port and container port</h2>
+    <table><thead><tr><th>Service</th><th>Host port</th><th>Container port</th><th>How you reach it</th></tr></thead>
+    <tbody id="portmap"><tr><td colspan="4">—</td></tr></tbody></table>
+    <p class="note" id="shared-note"></p>
+  </section>
+  <section>
+    <h2>Direct-access blocks (Docker apps)</h2>
+    <table><thead><tr><th>Allow / Block</th><th>Service</th><th>Host port</th><th>Container port</th><th>Helm-created</th><th></th></tr></thead>
+    <tbody id="docker-rules"><tr><td colspan="6">—</td></tr></tbody></table>
+    <p id="returns"></p>
+  </section>
+  <section>
+    <h2>Box rules</h2>
     <table><thead><tr><th>Allow / Block</th><th>Service</th><th>Protocol</th><th>Port</th><th>Who</th><th>Helm-created</th><th></th></tr></thead>
     <tbody id="rules"><tr><td colspan="7">—</td></tr></tbody></table>
     <p id="policy"></p>
@@ -26,18 +38,21 @@
     <tbody id="listening"><tr><td colspan="2">—</td></tr></tbody></table>
   </section>
   <section>
-    <h2>Add a rule — pick in plain terms, no firewall syntax needed</h2>
+    <h2>Add a rule — pick a service by name, no firewall syntax needed</h2>
     <form id="add-form">
       <label>Pick a service <select id="preset">
-        <option value="custom">Custom port…</option>
+        <option value="8003">PIA — direct port 8003, container 8000, stays on the website</option>
+        <option value="3000">Nope portal — direct port 3000, container 3000, stays on the website</option>
+        <option value="3001">TAIG Service Portal — direct port 3001, container 3000, stays on the website</option>
+        <option value="3002">TAIG Speed — direct port 3002, container 3000, NO website route</option>
         <option value="80">Web traffic (port 80)</option>
         <option value="443">Secure web traffic (port 443)</option>
         <option value="22">SSH (port 22) — allow only, never block</option>
+        <option value="custom">Custom port…</option>
       </select></label>
-      <label>Or pick something already listening on this box <select id="live-list"><option value="">— live list loads with rules —</option></select></label>
-      <label>Allow or block? <select id="action"><option value="allow">Allow</option><option value="deny">Block</option></select></label>
+      <label>Allow or block? <select id="action"><option value="deny">Block</option><option value="allow">Allow</option></select></label>
       <label>Protocol <select id="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>
-      <label>Port <input id="port" type="number" min="1" max="65535" required placeholder="e.g. 80"></label>
+      <label>Port <input id="port" type="number" min="1" max="65535" required value="8003"></label>
       <label>Who is it for? <input id="source" value="any" placeholder="anyone, or one address e.g. 1.2.3.4/32"></label>
       <button type="submit">Preview rule</button>
     </form>
@@ -54,7 +69,7 @@
     <p id="result-text"></p>
     <p id="verify-text"></p>
   </section>
-  <p class="note">Flow: info (read rules) → decide (fill form) → preview → approve → send structured payload → agent executes → laptop verifies by re-reading rules → log. No free-form shell, no auto-apply.</p>
+  <p class="note">Flow: info (read rules) → decide (pick a service by name) → preview in plain words → approve → send structured payload → agent writes it on the right port, saves it, laptop verifies by re-reading the live rules → log. No free-form shell, no auto-apply.</p>
 </main>
 <script src="firewall.js"></script>
 </body>

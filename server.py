@@ -100,14 +100,41 @@ def validate_firewall_payload(body):
     return payload, None
 
 
-SERVICE_NAMES = {
-    22: "SSH", 80: "Web", 443: "Secure web", 53: "DNS",
-    3000: "TAIG Service Portal", 3002: "TAIG Speed", 8003: "PIA",
+# Host -> container port map, Nov 5, 2026 live work. CORRECTION: host
+# 3000 is Nope portal (not TAIG Service Portal — that was the v1
+# mapping error), host 3001 is TSP, both share container 3000 with
+# TAIG Speed on host 3002. PIA host 8003 -> container 8000.
+SERVICE_PORT_MAP = {
+    22: {"name": "SSH", "host": 22, "container": None, "kind": "host",
+         "via": "Direct only — no website route", "shared_with": []},
+    80: {"name": "Web (Nginx)", "host": 80, "container": None, "kind": "host",
+         "via": "The website itself", "shared_with": []},
+    443: {"name": "Secure web", "host": 443, "container": None, "kind": "host",
+          "via": "Direct only", "shared_with": []},
+    53: {"name": "DNS", "host": 53, "container": None, "kind": "host",
+         "via": "Direct only", "shared_with": []},
+    3000: {"name": "Nope portal", "host": 3000, "container": 3000,
+           "kind": "docker", "via": "Website: / on port 80",
+           "shared_with": ["TAIG Service Portal", "TAIG Speed"]},
+    3001: {"name": "TAIG Service Portal", "host": 3001, "container": 3000,
+           "kind": "docker", "via": "Website: taigtsp on port 80",
+           "shared_with": ["Nope portal", "TAIG Speed"]},
+    3002: {"name": "TAIG Speed", "host": 3002, "container": 3000,
+           "kind": "docker", "via": "No website route — direct only",
+           "shared_with": ["Nope portal", "TAIG Service Portal"]},
+    8003: {"name": "PIA", "host": 8003, "container": 8000, "kind": "docker",
+           "via": "Website: /pia-ui/ and /pia-api/ on port 80",
+           "shared_with": []},
 }
 
 
 def service_name(port):
-    return SERVICE_NAMES.get(port, f"Port {port}")
+    info = SERVICE_PORT_MAP.get(port)
+    return info["name"] if info else f"Port {port}"
+
+
+def port_info(port):
+    return SERVICE_PORT_MAP.get(port)
 
 
 def firewall_safety_checks(payload, current_rules):
@@ -115,15 +142,36 @@ def firewall_safety_checks(payload, current_rules):
     If Firewall is not intuitive, it fails its own requirement, even
     if the rules are technically correct (Tee, Nov 4, 6:40 PM EST)."""
     checks = []
+    info = port_info(payload["port"])
     if payload["port"] == 22 and payload["action"] == "allow":
         checks.append("Port 22 is SSH — this is an allow, not a block, "
                       "so it does not lock you out.")
+    if info and info["kind"] == "docker":
+        if payload["action"] == "deny":
+            checks.append(
+                f"Blocking {info['name']} blocks it on its container "
+                f"port {info['container']}, not its host port "
+                f"{info['host']} — that is the port that actually blocks "
+                "it. The box itself does not block Docker ports.")
+        if info["shared_with"]:
+            verb = "blocks" if payload["action"] == "deny" else "unblocks"
+            checks.append(
+                f"This also {verb} {', '.join(info['shared_with'])}, "
+                f"because they share the same container port "
+                f"{info['container']}.")
+        if info["name"] == "TAIG Speed" and payload["action"] == "deny":
+            checks.append(
+                "TAIG Speed has no website route, so blocking it blocks "
+                "it completely for now. The fix is a proper host/subdomain "
+                "route — a separate decision, not part of this change.")
     checks.append("This only changes Helm's own rules for this box. "
                   "It never touches Docker's own rules.")
     checks.append("You do not need to know rule order — Helm puts the "
                   "rule where it belongs. No position to pick.")
-    checks.append("Runtime rule only — it does NOT survive a reboot "
-                  "until the persistence decision in main chat is made.")
+    checks.append("After apply, Helm saves the rule so it survives a "
+                  "reboot, and the laptop re-reads the live rules to "
+                  "verify. Reboot survival is not yet verified live — "
+                  "test after push.")
     if payload["op"] == "remove":
         checks.append("Remove only works for rules Helm created. "
                       "Rules from anything else are never removed.")
@@ -249,14 +297,51 @@ def mock_firewall():
         "input_policy": "ACCEPT",
         "rules": [
             {"chain": "INPUT", "action": "allow", "protocol": "tcp",
-             "port": 80, "service": "Web", "source": "0.0.0.0/0",
+             "port": 80, "service": "Web (Nginx)", "source": "0.0.0.0/0",
              "helm_managed": True,
              "raw": "-A INPUT -p tcp --dport 80 -m comment --comment taig-helm -j ACCEPT"},
         ],
+        "docker_user_rules": [
+            {"chain": "DOCKER-USER", "action": "return", "protocol": None,
+             "port": None, "service": None, "source": "127.0.0.0/8",
+             "helm_managed": False},
+            {"chain": "DOCKER-USER", "action": "return", "protocol": None,
+             "port": None, "service": None, "source": "172.17.0.0/16",
+             "helm_managed": False},
+            {"chain": "DOCKER-USER", "action": "deny", "protocol": "tcp",
+             "port": 8000, "service": "PIA", "source": "0.0.0.0/0",
+             "helm_managed": False,
+             "raw": "-A DOCKER-USER -p tcp --dport 8000 -j DROP"},
+        ],
+        "docker_user_returns_present": {"127.0.0.0/8": True,
+                                        "172.17.0.0/16": True},
+        "port_map": [
+            {"host_port": 3000, "container_port": 3000,
+             "container": "nope-portal", "name": "Nope portal",
+             "kind": "docker", "via": "Website: / on port 80"},
+            {"host_port": 3001, "container_port": 3000, "container": "tsp",
+             "name": "TAIG Service Portal", "kind": "docker",
+             "via": "Website: taigtsp on port 80"},
+            {"host_port": 3002, "container_port": 3000,
+             "container": "taig-speed", "name": "TAIG Speed",
+             "kind": "docker", "via": "No website route — direct only"},
+            {"host_port": 8003, "container_port": 8000, "container": "pia",
+             "name": "PIA", "kind": "docker",
+             "via": "Website: /pia-ui/ and /pia-api/ on port 80"},
+            {"host_port": 22, "container_port": None, "container": None,
+             "name": "SSH", "kind": "host",
+             "via": "Direct only — no website route"},
+            {"host_port": 80, "container_port": None, "container": None,
+             "name": "Web (Nginx)", "kind": "host",
+             "via": "The website itself"},
+        ],
+        "port_map_note": "MOCK — example map only, not live.",
         "listening_ports": [{"proto": "tcp", "local": "0.0.0.0:22"},
                             {"proto": "tcp", "local": "0.0.0.0:3002"}],
-        "persistent_note": "MOCK — runtime rules only, persistence open.",
-        "guards": ["never deny SSH port 22", "never touch DOCKER chains"],
+        "persistent_note": "MOCK — Helm saves after every change.",
+        "guards": ["never deny SSH port 22",
+                   "never touch DOCKER / DOCKER-FORWARD chains",
+                   "Docker blocks go on the container port"],
     }
 
 
@@ -418,6 +503,64 @@ def mock_logs_read(payload):
             "note": "MOCK — example lines only, not live Droplet lines."}
 
 
+def run_processes_ssh(cfg):
+    remote = f"python3 {cfg['agent_path']} processes list"
+    key = os.path.expanduser(cfg["ssh_key"])
+    ssh_cmd = ["ssh", "-i", key, "-o", "BatchMode=yes",
+               "-o", "ConnectTimeout=10",
+               f"{cfg['ssh_user']}@{cfg['droplet_host']}", remote]
+    start = time.time()
+    proc = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=120)
+    duration_ms = int((time.time() - start) * 1000)
+    log_ssh(remote, proc.returncode, duration_ms, "")
+    if proc.returncode != 0:
+        raise RuntimeError(f"ssh/processes failed rc={proc.returncode}: "
+                           f"{proc.stderr.strip()[-500:]}")
+    return json.loads(proc.stdout)
+
+
+def mock_processes():
+    return {
+        "services": [
+            {"name": "docker.service", "plain_name": "docker",
+             "load": "loaded", "active": "active", "sub": "running",
+             "description": "Docker Application Container Engine"},
+            {"name": "nginx.service", "plain_name": "nginx",
+             "load": "loaded", "active": "active", "sub": "running",
+             "description": "A high performance web server"},
+            {"name": "ssh.service", "plain_name": "ssh",
+             "load": "loaded", "active": "active", "sub": "running",
+             "description": "OpenBSD Secure Shell server"},
+            {"name": "cron.service", "plain_name": "cron",
+             "load": "loaded", "active": "active", "sub": "running",
+             "description": "Regular background program processing daemon"},
+        ],
+        "service_count": 4,
+        "top_processes": [
+            {"pid": 123, "name": "dockerd", "cpu_percent": 2.1,
+             "mem_percent": 3.4, "elapsed": "1-02:03:04"},
+            {"pid": 456, "name": "node", "cpu_percent": 1.2,
+             "mem_percent": 2.0, "elapsed": "05:12:33"},
+            {"pid": 789, "name": "python3", "cpu_percent": 0.8,
+             "mem_percent": 1.1, "elapsed": "03:04:05"},
+        ],
+        "containers": [
+            {"name": "pia", "plain_name": "PIA", "status": "Up 3 hours",
+             "ports": "0.0.0.0:8003->8003/tcp"},
+            {"name": "nope-portal", "plain_name": "Nope portal",
+             "status": "Up 5 hours (healthy)", "ports": "0.0.0.0:3000->3000/tcp"},
+            {"name": "taig-speed", "plain_name": "TAIG Speed",
+             "status": "Up 24 hours (healthy)", "ports": "0.0.0.0:3002->3000/tcp"},
+            {"name": "tsp", "plain_name": "TAIG Service Portal",
+             "status": "Up 25 hours (healthy)", "ports": "0.0.0.0:3001->3000/tcp"},
+        ],
+        "container_count": 4,
+        "notes": [],
+        "note": "MOCK — example data only, not the live Droplet list. "
+                "Read-only: no kill/stop/restart in this MVP.",
+    }
+
+
 def mock_status():
     return {
         "agent": "taig_helm_agent",
@@ -441,6 +584,36 @@ def mock_status():
     }, {"source": "mock", "verified_by": "none",
         "note": "MOCK ONLY — not the v1 proof. Run with HELM_MOCK unset "
                 "for live Droplet data."}
+
+
+def annotate_firewall(data):
+    """Annotate INPUT rules by host port, and Docker blocks by
+    CONTAINER port mapped back to the primary host port + service.
+    Used for both live and mock reads, so mock shows the same ports."""
+    for r in data.get("rules", []):
+        if isinstance(r.get("port"), int):
+            r["service"] = service_name(r["port"])
+            info = port_info(r["port"])
+            if info:
+                r["container_port"] = info["container"]
+                r["via"] = info["via"]
+    port_map = data.get("port_map", [])
+    for r in data.get("docker_user_rules", []):
+        if r.get("action") == "return":
+            r["service"] = "Local traffic — let through"
+            continue
+        cont = r.get("port")
+        hosts = [e for e in port_map
+                 if e.get("container_port") == cont]
+        primary = hosts[0] if hosts else None
+        r["container_port"] = cont
+        if primary:
+            r["port"] = primary["host_port"]
+            r["service"] = primary["name"]
+            r["via"] = primary["via"]
+            r["shared_with"] = [h["name"] for h in hosts[1:]]
+        else:
+            r["service"] = f"Container port {cont}"
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -470,6 +643,8 @@ class Handler(SimpleHTTPRequestHandler):
             self.handle_updates_read()
         elif path == "/api/logs":
             self.handle_logs_list()
+        elif path == "/api/processes":
+            self.handle_processes_list()
         else:
             super().do_GET()
 
@@ -492,6 +667,17 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/logs/read":
             return self.handle_logs_read(body)
         return self.send_json({"error": "unknown endpoint"}, status=404)
+
+    def handle_processes_list(self):
+        if os.environ.get("HELM_MOCK") == "1":
+            return self.send_json({"data": mock_processes(),
+                                   "meta": {"source": "mock"}})
+        try:
+            cfg = load_config()
+            data = run_processes_ssh(cfg)
+        except Exception as exc:
+            return self.send_json({"error": str(exc)}, status=502)
+        return self.send_json({"data": data, "meta": {"source": "live"}})
 
     def handle_logs_list(self):
         if os.environ.get("HELM_MOCK") == "1":
@@ -614,14 +800,14 @@ class Handler(SimpleHTTPRequestHandler):
 
     def handle_firewall_read(self):
         if os.environ.get("HELM_MOCK") == "1":
-            return self.send_json({"data": mock_firewall(),
+            data = mock_firewall()
+            annotate_firewall(data)
+            return self.send_json({"data": data,
                                    "meta": {"source": "mock"}})
         try:
             cfg = load_config()
             data = run_firewall_ssh(cfg, "list")
-            for r in data.get("rules", []):
-                if isinstance(r.get("port"), int):
-                    r["service"] = service_name(r["port"])
+            annotate_firewall(data)
         except Exception as exc:
             return self.send_json({"error": str(exc)}, status=502)
         return self.send_json({"data": data, "meta": {"source": "live"}})
@@ -641,24 +827,52 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception:
                 current = []
         token = make_preview_token(payload)
-        # Intuitive first: plain words, no iptables syntax required.
+        # Intuitive first: plain words, no syntax, no chain names.
         # Technical detail is kept, but second, not as the headline.
-        verb = "Allow" if payload["action"] == "allow" else "Block"
+        info = port_info(payload["port"])
         whom = ("from anywhere" if payload["source"] == "0.0.0.0/0"
                 else f"only from {payload['source']}")
-        svc = service_name(payload["port"])
-        plain = (f"{'Add' if payload['op'] == 'add' else 'Remove'}: "
-                 f"{verb} {svc} ({payload['protocol'].upper()} "
-                 f"port {payload['port']}) {whom}.")
+        svc = info["name"] if info else service_name(payload["port"])
+        if payload["op"] == "remove":
+            plain = f"Remove: {svc} rule ({payload['action']}) on port {payload['port']} {whom}."
+        elif info and info["kind"] == "docker" and payload["action"] == "deny":
+            if "port 80" in info["via"]:
+                plain = (f"Block direct access to {svc} on {info['host']} — "
+                         f"{svc} stays reachable through the website on "
+                         f"port 80.")
+            else:
+                plain = (f"Block direct access to {svc} on {info['host']} — "
+                         f"{svc} has no website route, so it will not be "
+                         "reachable at all until a proper host/subdomain "
+                         "route is built.")
+            if info["shared_with"]:
+                plain += (f" This also blocks "
+                          f"{', '.join(info['shared_with'])}, because they "
+                          f"share the same container port "
+                          f"{info['container']}.")
+        elif info and info["kind"] == "docker" and payload["action"] == "allow":
+            plain = (f"Allow direct access to {svc} on {info['host']} "
+                     "again — removes the block.")
+            if info["shared_with"]:
+                plain += (f" This also unblocks "
+                          f"{', '.join(info['shared_with'])}, because they "
+                          f"share the same container port "
+                          f"{info['container']}.")
+        else:
+            verb = "Allow" if payload["action"] == "allow" else "Block"
+            plain = (f"Add: {verb} {svc} ({payload['protocol'].upper()} "
+                     f"port {payload['port']}) {whom}.")
+        technical = (f"Technical: {payload['op']} {payload['action']} "
+                     f"{payload['protocol']} host port {payload['port']}"
+                     + (f", container port {info['container']}"
+                        if info and info.get("container") else "")
+                     + f" from {payload['source']}, comment taig-helm.")
         return self.send_json({
             "payload": payload,
             "preview_token": token,
             "safety_checks": firewall_safety_checks(payload, current),
             "effect": plain,
-            "technical": (f"Technical: {payload['op']} INPUT rule, "
-                          f"{payload['action']} {payload['protocol']} "
-                          f"port {payload['port']} from {payload['source']}, "
-                          f"comment taig-helm, INPUT only."),
+            "technical": technical,
             "note": "Nothing has been sent yet. Approve to send this exact payload.",
         })
 
@@ -680,19 +894,48 @@ class Handler(SimpleHTTPRequestHandler):
             result = run_firewall_ssh(cfg, payload["op"], payload)
             # Verification, on the laptop, by RE-READING rules — never
             # exit code alone. The apply result above is not proof.
+            # Docker services are verified on their CONTAINER port in
+            # the Docker blocks; host services on their host port.
             verified = run_firewall_ssh(cfg, "list")
-            found = any(
-                r.get("action") == payload["action"]
-                and r.get("protocol") == payload["protocol"]
-                and r.get("port") == payload["port"]
-                for r in verified.get("rules", []))
-            expected = payload["op"] == "add"
-            verification = {
-                "method": "state re-read (firewall list)",
-                "expected_present": expected,
-                "found_present": found,
-                "verified": found == expected,
-            }
+            info = port_info(payload["port"])
+            if info and info["kind"] == "docker":
+                if payload["op"] == "add" and payload["action"] == "allow":
+                    # Allow = block removed, so expected present is False.
+                    expected = False
+                    check_action = "deny"
+                elif payload["op"] == "remove":
+                    expected = False
+                    check_action = "deny"
+                else:
+                    expected = True
+                    check_action = "deny"
+                found = any(
+                    r.get("action") == check_action
+                    and r.get("protocol") == payload["protocol"]
+                    and r.get("port") == info["container"]
+                    for r in verified.get("docker_user_rules", []))
+                verification = {
+                    "method": "state re-read (firewall list, container port)",
+                    "expected_present": expected,
+                    "found_present": found,
+                    "verified": found == expected,
+                    "container_port": info["container"],
+                    "persistent_saved": result.get("persistent_saved"),
+                }
+            else:
+                found = any(
+                    r.get("action") == payload["action"]
+                    and r.get("protocol") == payload["protocol"]
+                    and r.get("port") == payload["port"]
+                    for r in verified.get("rules", []))
+                expected = payload["op"] == "add"
+                verification = {
+                    "method": "state re-read (firewall list)",
+                    "expected_present": expected,
+                    "found_present": found,
+                    "verified": found == expected,
+                    "persistent_saved": result.get("persistent_saved"),
+                }
         except Exception as exc:
             return self.send_json({"error": str(exc)}, status=502)
         return self.send_json({

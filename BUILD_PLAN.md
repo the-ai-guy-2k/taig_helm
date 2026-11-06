@@ -50,6 +50,20 @@ technically correct.
    or save rules another way. Do NOT install it yet. Until decided,
    rules are runtime only and the GUI says so plainly.
 
+## Firewall — CORRECTION, Nov 5, 2026 (agent v0.6.0, not yet pushed)
+
+INPUT-only does NOT work for Docker. Live Droplet work Nov 5, verified:
+only 22 + 80 open, direct Docker ports closed via DOCKER-USER.
+Agent now writes Docker blocks to DOCKER-USER on the container port
+(Nope 3000->3000, TSP 3001->3000, Speed 3002->3000, PIA 8003->8000),
+with RETURN 127/8 + 172.17/16 first, then netfilter-persistent save,
+then laptop verifies by re-reading live rules. Host services stay
+on INPUT. Shared container 3000 blocks Nope, TSP, and Speed together
+— UI shows that plainly, and TAIG Speed has no Nginx route (fix is a
+proper host/subdomain route, Tee's call, NOT a subpath, NOT in Helm).
+Also corrected: host 3000 is Nope portal, not TAIG Service Portal
+(that was the v1 mapping error). Reboot survival not yet verified live.
+
 ## SECOND FEATURE after v1 — Updates (Nov 4, 6:55 PM EST)
 
 Updates group is the ONE place to update the whole box OR just one
@@ -93,6 +107,34 @@ taig-helm-agent.log 108K, nginx access/error logs present
 (access.log.1 124K), dpkg.log 32K, apt logs,
 unattended-upgrades logs, cloud-init logs, kern.log/dmesg.
 Containers live: pia, nope-portal, taig-speed, tsp.
+
+## Logs — BUGS OPEN / DEFERRED (Tee, Nov 4, 7:26 PM EST)
+
+Logs feature has some bugs, fix LATER — do NOT fix Logs bugs now.
+Exact bugs are Tee's to name when he reports them — NO bug list is
+invented here. When Tee reports the exact bugs he saw, log those
+verbatim and fix them in that later step.
+Logs is NOT closed as bug-free. The Processes build below does NOT
+touch Logs code.
+
+## FOURTH FEATURE after v1 — Processes / Task-Process (Nov 4, 7:26 PM EST)
+
+Task/Process Management group, MVP READ-ONLY, same read-everything
+order as Logs (cool UI theme later, on Tee's ask, not now).
+Agent processes list: running systemd services, top processes by CPU,
+running Docker containers — plain names, CPU, memory, status,
+structured only. Helm server GET /api/processes, web/processes.html.
+NO kill/stop/restart/start in this build — execution actions are a
+later step, with preview/approve.
+Live Droplet facts at build time (Nov 4, 7:26 PM):
+23 systemd services running (docker, containerd, nginx, ssh, cron,
+rsyslog, systemd-journald, unattended-upgrades, do-agent,
+droplet-agent, etc.). Containers: pia (Up 3h, 8003), nope-portal
+(Up 5h, healthy, 3000), taig-speed (Up 24h, healthy, 3002), tsp
+(Up 25h, healthy, 3001). Top processes include containerd, dockerd,
+node servers for the containers, python PIA backend.
+Logs bugs from Nov 4, 7:26 PM are NOT fixed in this build — see the
+Logs bugs section above. No Logs code touched here.
 
 ## After v1 proof passes — task flow, in order
 

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TAIG Helm — Processes</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">TAIG <span>Helm</span> — Processes</div>
+  <div class="topmeta"><a href="index.html" style="color:#d8b25c">← Home</a> &middot; Task / Process Management, read-only for now</div>
+</header>
+<main>
+  <div id="banner" class="banner">Loading processes…</div>
+  <p class="note"><strong>Read-only.</strong> This page shows what's running — services, containers, and top processes — in plain names. It does <strong>not</strong> stop, kill, or restart anything. Those actions come later, with preview/approve, on Tee's ask.</p>
+  <section>
+    <h2>Services running (<span id="svc-count">—</span>)</h2>
+    <table><thead><tr><th>Service</th><th>Status</th><th>What it is</th></tr></thead>
+    <tbody id="services"><tr><td colspan="3">—</td></tr></tbody></table>
+  </section>
+  <section>
+    <h2>Containers running (<span id="ctr-count">—</span>)</h2>
+    <table><thead><tr><th>App</th><th>Status</th><th>Ports</th></tr></thead>
+    <tbody id="containers"><tr><td colspan="3">—</td></tr></tbody></table>
+  </section>
+  <section>
+    <h2>Top processes by CPU</h2>
+    <table><thead><tr><th>Process</th><th>PID</th><th>CPU %</th><th>Memory %</th><th>Running for</th></tr></thead>
+    <tbody id="top"><tr><td colspan="5">—</td></tr></tbody></table>
+    <button id="refresh">Refresh now</button>
+  </section>
+  <p class="note">Flow: read (structured only) → show. No action is sent from this page. Cool UI theme work is a later step, on Tee's ask, not now — this page uses the existing Hestia-style theme.</p>
+</main>
+<script src="processes.js"></script>
+</body>
+</html>
